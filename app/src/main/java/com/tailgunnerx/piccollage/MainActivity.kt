@@ -207,26 +207,23 @@ fun PicCollageApp() {
 
             // ── Preview / editor canvas ─────────────────────────────────────────
 
-            Box(
+            // CollageEditorCanvas sizes itself: the square canvas plus the
+            // "drag to add" handle row beneath it, so no aspectRatio here.
+            CollageEditorCanvas(
+                root = root,
+                photos = photosByBoxId,
+                borderPx = borderPx,
+                borderStyle = borderStyle,
+                onTreeChange = ::applyTreeChange,
+                onRequestPhoto = { boxId ->
+                    activeBoxIdToFill = boxId
+                    photoPickerLauncher.launch("image/*")
+                },
+                onRemovePhoto = { boxId -> photosByBoxId.remove(boxId) },
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
                     .fillMaxWidth()
-                    .aspectRatio(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                CollageEditorCanvas(
-                    root = root,
-                    photos = photosByBoxId,
-                    borderPx = borderPx,
-                    borderStyle = borderStyle,
-                    onTreeChange = ::applyTreeChange,
-                    onRequestPhoto = { boxId ->
-                        activeBoxIdToFill = boxId
-                        photoPickerLauncher.launch("image/*")
-                    },
-                    onRemovePhoto = { boxId -> photosByBoxId.remove(boxId) }
-                )
-            }
+            )
 
             Spacer(Modifier.height(14.dp))
 

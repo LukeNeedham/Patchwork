@@ -1,5 +1,6 @@
 package com.tailgunnerx.piccollage
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,10 +11,12 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,14 +34,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -50,8 +57,8 @@ private enum class DragKind { MOVE, ADD }
  * The interactive collage canvas: every box can be dragged to a new spot,
  * resized via the handles on shared dividers (the neighbor shrinks/grows to
  * match), dragged out past the edge to remove it (its sibling absorbs the
- * space), or added by dragging the "+" button onto an existing box (which
- * splits to make room).
+ * space), or added by dragging the handle below the canvas onto an existing
+ * box (which splits to make room).
  */
 @Composable
 fun CollageEditorCanvas(
@@ -66,27 +73,41 @@ fun CollageEditorCanvas(
 ) {
     val currentRoot = rememberUpdatedState(root)
 
+    var outerCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var canvasCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    // The FAB is a direct child of the canvas box, so its positionInParent() is
-    // already in canvas-local coordinates - no extra conversion needed.
-    var fabCenterInOuter by remember { mutableStateOf<Offset?>(null) }
+    var addHandleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     var dragKind by remember { mutableStateOf<DragKind?>(null) }
     var dragLeafId by remember { mutableStateOf<String?>(null) }
-    var ghostCanvasPx by remember { mutableStateOf<Offset?>(null) }
+    // Always in the outer Box's coordinate space, since the ghost it drives can
+    // travel from the add-handle (below the canvas) onto the canvas itself.
+    var ghostPos by remember { mutableStateOf<Offset?>(null) }
     var hoverTarget by remember { mutableStateOf<Pair<String, QuadrantInsert>?>(null) }
     var isOutOfBounds by remember { mutableStateOf(false) }
 
-    fun updateGhost(posInCanvasPx: Offset) {
-        ghostCanvasPx = posInCanvasPx
-        val coords = canvasCoords
-        val w = coords?.size?.width?.toFloat() ?: 0f
-        val h = coords?.size?.height?.toFloat() ?: 0f
+    fun canvasOriginInOuter(): Offset {
+        val oc = outerCoords ?: return Offset.Zero
+        val cc = canvasCoords ?: return Offset.Zero
+        return oc.localPositionOf(cc, Offset.Zero)
+    }
+
+    fun addHandleCenterInOuter(): Offset? {
+        val oc = outerCoords ?: return null
+        val hc = addHandleCoords ?: return null
+        return oc.localPositionOf(hc, Offset(hc.size.width / 2f, hc.size.height / 2f))
+    }
+
+    fun updateGhost(posInOuterPx: Offset) {
+        ghostPos = posInOuterPx
+        val cCoords = canvasCoords ?: return
+        val w = cCoords.size.width.toFloat()
+        val h = cCoords.size.height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val outside = posInCanvasPx.x !in 0f..w || posInCanvasPx.y !in 0f..h
+        val local = posInOuterPx - canvasOriginInOuter()
+        val outside = local.x !in 0f..w || local.y !in 0f..h
         isOutOfBounds = outside
         hoverTarget = if (outside) null else {
-            val norm = (posInCanvasPx.x / w) to (posInCanvasPx.y / h)
+            val norm = (local.x / w) to (local.y / h)
             findDropTarget(currentRoot.value, norm, excludeLeafId = dragLeafId)
         }
     }
@@ -94,7 +115,7 @@ fun CollageEditorCanvas(
     fun clearDrag() {
         dragKind = null
         dragLeafId = null
-        ghostCanvasPx = null
+        ghostPos = null
         hoverTarget = null
         isOutOfBounds = false
     }
@@ -125,75 +146,73 @@ fun CollageEditorCanvas(
         clearDrag()
     }
 
-    // The canvas fills the whole area the caller gives us (typically a square).
-    // The "add" button and drag ghost float on top of it, like the existing
-    // per-photo rotate/remove buttons already do - no separate space needed.
-    Box(
-        modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Dark800)
-            .then(
-                if (dragKind == DragKind.MOVE && isOutOfBounds)
-                    Modifier.border(3.dp, Color(0xFFFF5252), RoundedCornerShape(16.dp))
-                else Modifier
-            )
-            .onGloballyPositioned { canvasCoords = it }
-    ) {
-        CollageLayoutBody(
-            root = root,
-            photos = photos,
-            borderPx = borderPx,
-            borderStyle = borderStyle,
-            editable = true,
-            movingLeafId = dragLeafId,
-            hoverTarget = hoverTarget,
-            onTreeChange = onTreeChange,
-            onRequestPhoto = onRequestPhoto,
-            onRemovePhoto = onRemovePhoto,
-            onMoveDragStart = { leafId, startCenterPx ->
-                dragKind = DragKind.MOVE
-                dragLeafId = leafId
-                updateGhost(startCenterPx)
-            },
-            onMoveDrag = { delta -> ghostCanvasPx?.let { updateGhost(it + delta) } },
-            onMoveDragEnd = { commitDrag() }
-        )
-
-        // Floating "add a box" handle - drag it onto an existing box to split it.
-        Box(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .padding(10.dp)
-                .size(48.dp)
-                .onGloballyPositioned {
-                    fabCenterInOuter = it.positionInParent() +
-                        Offset(it.size.width / 2f, it.size.height / 2f)
-                }
-                .clip(CircleShape)
-                .background(AppGradient)
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = {
-                            dragKind = DragKind.ADD
-                            dragLeafId = null
-                            updateGhost(fabCenterInOuter ?: Offset.Zero)
-                        },
-                        onDrag = { change, amount ->
-                            change.consume()
-                            ghostCanvasPx?.let { updateGhost(it + amount) }
-                        },
-                        onDragEnd = { commitDrag() },
-                        onDragCancel = { clearDrag() }
+    Box(modifier.onGloballyPositioned { outerCoords = it }) {
+        Column(Modifier.fillMaxWidth()) {
+            // The square collage canvas.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Dark800)
+                    .then(
+                        if (dragKind == DragKind.MOVE && isOutOfBounds)
+                            Modifier.border(3.dp, Color(0xFFFF5252), RoundedCornerShape(16.dp))
+                        else Modifier
                     )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Text("＋", color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    .onGloballyPositioned { canvasCoords = it }
+            ) {
+                CollageLayoutBody(
+                    root = root,
+                    photos = photos,
+                    borderPx = borderPx,
+                    borderStyle = borderStyle,
+                    editable = true,
+                    movingLeafId = dragLeafId,
+                    hoverTarget = hoverTarget,
+                    onTreeChange = onTreeChange,
+                    onRequestPhoto = onRequestPhoto,
+                    onRemovePhoto = onRemovePhoto,
+                    onMoveDragStart = { leafId, startCenterPxCanvasLocal ->
+                        dragKind = DragKind.MOVE
+                        dragLeafId = leafId
+                        updateGhost(canvasOriginInOuter() + startCenterPxCanvasLocal)
+                    },
+                    onMoveDrag = { delta -> ghostPos?.let { updateGhost(it + delta) } },
+                    onMoveDragEnd = { commitDrag() }
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            // The "add a box" handle - outside the canvas entirely, so it never
+            // sits on top of a photo. Dashed and labelled, not a filled button,
+            // since tapping it does nothing: it only works by dragging onto a box.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                DraggableAddHandle(
+                    modifier = Modifier
+                        .onGloballyPositioned { addHandleCoords = it }
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = {
+                                    dragKind = DragKind.ADD
+                                    dragLeafId = null
+                                    addHandleCenterInOuter()?.let { updateGhost(it) }
+                                },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    ghostPos?.let { updateGhost(it + amount) }
+                                },
+                                onDragEnd = { commitDrag() },
+                                onDragCancel = { clearDrag() }
+                            )
+                        }
+                )
+            }
         }
 
         // Ghost preview following the finger while a move/add drag is active.
-        val ghost = ghostCanvasPx
+        val ghost = ghostPos
         if (dragKind != null && ghost != null) {
             val density = LocalDensity.current
             val ghostSize = 56.dp
@@ -213,6 +232,29 @@ fun CollageEditorCanvas(
                     )
             )
         }
+    }
+}
+
+/** A drag-only affordance for adding a box: dashed and labelled so it reads as
+ *  "drop target to pick up", not a button that does something on tap. */
+@Composable
+private fun DraggableAddHandle(modifier: Modifier = Modifier) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(modifier.size(60.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawRoundRect(
+                    color = Pink500,
+                    style = Stroke(
+                        width = 2.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 7f), 0f)
+                    ),
+                    cornerRadius = CornerRadius(12.dp.toPx())
+                )
+            }
+            Text("＋", color = Pink500, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("Drag to add", color = Subtle, fontSize = 11.sp)
     }
 }
 
@@ -357,7 +399,7 @@ private fun ResizeHandle(
     val centerNormY = if (isRow) (rect.top + rect.bottom) / 2f else rect.top + rect.height * split.fraction
     val centerPx = Offset(centerNormX * canvasWidthPx, centerNormY * canvasHeightPx)
     val axisPx = if (isRow) rect.width * canvasWidthPx else rect.height * canvasHeightPx
-    val handleSize = 26.dp
+    val handleSize = 38.dp
     val handleSizePx = with(density) { handleSize.toPx() }
     val splitState = rememberUpdatedState(split)
     val axisPxState = rememberUpdatedState(axisPx)
@@ -395,11 +437,15 @@ private fun ResizeHandle(
     ) {
         // Shows which way this handle drags, so it's clear at a glance - a
         // left-right arrow for a vertical divider, up-down for a horizontal one.
+        // includeFontPadding = false strips the glyph's default top/bottom padding,
+        // which otherwise throws off centering inside a tight circle like this.
         Text(
             text = if (isRow) "↔" else "↕",
             color = Pink500,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            lineHeight = 20.sp,
+            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
         )
     }
 }
