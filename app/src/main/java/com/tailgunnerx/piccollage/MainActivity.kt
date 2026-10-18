@@ -49,6 +49,7 @@ import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 // ─── Palette ────────────────────────────────────────────────────────────────
 val Pink500   = Color(0xFFE91E8C)
@@ -78,6 +79,9 @@ class PhotoState(initialBitmap: Bitmap) {
     fun toPhotoData() = PhotoData(bitmap, panX, panY, zoom)
 }
 
+/** A photo in the user's pool, independent of whether (or where) it's placed in the layout. */
+data class PoolPhoto(val id: String, val state: PhotoState)
+
 // ─── Activity ────────────────────────────────────────────────────────────────
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,13 +100,16 @@ fun PicCollageApp() {
     var root by remember { mutableStateOf(initialTemplate.tree) }
     var selectedTemplateId by remember { mutableStateOf(initialTemplate.id) }
     val photosByBoxId = remember { mutableStateMapOf<String, PhotoState>() }
+    val photoPool = remember { mutableStateListOf<PoolPhoto>() }
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
     var isSaving by remember { mutableStateOf(false) }
     var borderPx by remember { mutableStateOf(8f) }
     var borderStyle by remember { mutableStateOf<BorderStyle>(BorderStyle.SolidColor(Color.White)) }
 
-    var activeBoxIdToFill by remember { mutableStateOf<String?>(null) }
+    // Set before launching the picker: which box (if any) the newly-picked
+    // photo should also be assigned to, besides being added to the pool.
+    var pendingAssignBoxId by remember { mutableStateOf<String?>(null) }
 
     fun applyTreeChange(newRoot: LayoutNode) {
         root = newRoot
@@ -123,18 +130,24 @@ fun PicCollageApp() {
         selectedTemplateId = template.id
     }
 
-    // Single-photo picker launcher
+    // Single-photo picker launcher. Every picked photo joins the pool; if it
+    // was requested from a specific box (rather than the pool's own "+" tile),
+    // it's also assigned there directly.
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        val boxId = activeBoxIdToFill
-        if (uri != null && boxId != null) {
+        val assignBoxId = pendingAssignBoxId
+        if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 try {
                     context.contentResolver.openInputStream(uri)?.use { stream ->
                         val bmp = BitmapFactory.decodeStream(stream)
                         withContext(Dispatchers.Main) {
-                            photosByBoxId[boxId] = PhotoState(bmp)
+                            val poolPhoto = PoolPhoto(UUID.randomUUID().toString(), PhotoState(bmp))
+                            photoPool.add(poolPhoto)
+                            if (assignBoxId != null) {
+                                photosByBoxId[assignBoxId] = poolPhoto.state
+                            }
                         }
                     }
                 } catch (_: Exception) {}
@@ -197,7 +210,7 @@ fun PicCollageApp() {
                 }
             }
             Text(
-                "Drag boxes to move, drag edges to resize, drag ✚ in to add, drag a box out to remove",
+                "Long-press a box to move or remove it, drag edges to resize, tap a box or drag a photo in to fill it",
                 color = Subtle,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)
@@ -207,19 +220,27 @@ fun PicCollageApp() {
 
             // ── Preview / editor canvas ─────────────────────────────────────────
 
-            // CollageEditorCanvas sizes itself: the square canvas plus the
-            // "drag to add" handle row beneath it, so no aspectRatio here.
+            // CollageEditorCanvas sizes itself: the square canvas, the "drag to
+            // add" handle, and the photo pool, so no aspectRatio here.
             CollageEditorCanvas(
                 root = root,
-                photos = photosByBoxId,
+                photosByBoxId = photosByBoxId,
+                photoPool = photoPool,
                 borderPx = borderPx,
                 borderStyle = borderStyle,
                 onTreeChange = ::applyTreeChange,
                 onRequestPhoto = { boxId ->
-                    activeBoxIdToFill = boxId
+                    pendingAssignBoxId = boxId
                     photoPickerLauncher.launch("image/*")
                 },
                 onRemovePhoto = { boxId -> photosByBoxId.remove(boxId) },
+                onAssignPhoto = { boxId, poolPhotoId ->
+                    photoPool.firstOrNull { it.id == poolPhotoId }?.let { photosByBoxId[boxId] = it.state }
+                },
+                onRequestAddToPool = {
+                    pendingAssignBoxId = null
+                    photoPickerLauncher.launch("image/*")
+                },
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
                     .fillMaxWidth()
