@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -146,7 +147,7 @@ fun CollageEditorCanvas(
             borderStyle = borderStyle,
             editable = true,
             movingLeafId = dragLeafId,
-            hoverTargetLeafId = hoverTarget?.first,
+            hoverTarget = hoverTarget,
             onTreeChange = onTreeChange,
             onRequestPhoto = onRequestPhoto,
             onRemovePhoto = onRemovePhoto,
@@ -223,7 +224,7 @@ private fun CollageLayoutBody(
     borderStyle: BorderStyle,
     editable: Boolean,
     movingLeafId: String?,
-    hoverTargetLeafId: String?,
+    hoverTarget: Pair<String, QuadrantInsert>?,
     onTreeChange: (LayoutNode) -> Unit,
     onRequestPhoto: (String) -> Unit,
     onRemovePhoto: (String) -> Unit,
@@ -247,7 +248,6 @@ private fun CollageLayoutBody(
                 rect.toPixelRectWithBorder(wPx, hPx, borderPxPx)
             }
             val isMoving = editable && movingLeafId == leafId
-            val isHoverTarget = editable && hoverTargetLeafId == leafId
             val centerPx = Offset(px.left + px.width / 2f, px.top + px.height / 2f)
             val centerPxState = rememberUpdatedState(centerPx)
 
@@ -263,10 +263,6 @@ private fun CollageLayoutBody(
                         height = with(density) { px.height.toDp() }
                     )
                     .alpha(if (isMoving) 0.25f else 1f)
-                    .then(
-                        if (isHoverTarget) Modifier.border(3.dp, Pink500, RoundedCornerShape(6.dp))
-                        else Modifier
-                    )
             ) {
                 PhotoCellBox(
                     boxId = leafId,
@@ -297,7 +293,53 @@ private fun CollageLayoutBody(
                 )
             }
         }
+
+        // Ghost split preview: shows exactly how the hovered box will divide -
+        // the new box's landing spot in pink, the existing box's new, smaller
+        // footprint outlined - before the drag is dropped.
+        if (editable && hoverTarget != null) {
+            val (targetId, insert) = hoverTarget
+            val targetRect = leafRects[targetId]
+            if (targetRect != null) {
+                val (firstNorm, secondNorm) = targetRect.splitBy(insert.direction, 0.5f)
+                val newBoxNorm = if (insert.newFirst) firstNorm else secondNorm
+                val remainingNorm = if (insert.newFirst) secondNorm else firstNorm
+                val newBoxPx = newBoxNorm.toPixelRectWithBorder(wPx, hPx, borderPxPx)
+                val remainingPx = remainingNorm.toPixelRectWithBorder(wPx, hPx, borderPxPx)
+
+                PixelRectOverlay(
+                    remainingPx,
+                    density,
+                    Modifier.border(2.dp, Color.White.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                )
+                PixelRectOverlay(
+                    newBoxPx,
+                    density,
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Pink500.copy(alpha = 0.45f))
+                        .border(2.dp, Pink500, RoundedCornerShape(6.dp))
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun BoxScope.PixelRectOverlay(px: PixelRect, density: androidx.compose.ui.unit.Density, modifier: Modifier) {
+    Box(
+        Modifier
+            .align(Alignment.TopStart)
+            .offset(
+                x = with(density) { px.left.toDp() },
+                y = with(density) { px.top.toDp() }
+            )
+            .size(
+                width = with(density) { px.width.toDp() },
+                height = with(density) { px.height.toDp() }
+            )
+            .then(modifier)
+    )
 }
 
 @Composable
@@ -315,7 +357,7 @@ private fun ResizeHandle(
     val centerNormY = if (isRow) (rect.top + rect.bottom) / 2f else rect.top + rect.height * split.fraction
     val centerPx = Offset(centerNormX * canvasWidthPx, centerNormY * canvasHeightPx)
     val axisPx = if (isRow) rect.width * canvasWidthPx else rect.height * canvasHeightPx
-    val handleSize = 22.dp
+    val handleSize = 26.dp
     val handleSizePx = with(density) { handleSize.toPx() }
     val splitState = rememberUpdatedState(split)
     val axisPxState = rememberUpdatedState(axisPx)
@@ -348,8 +390,18 @@ private fun ResizeHandle(
                         }
                     }
                 )
-            }
-    )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        // Shows which way this handle drags, so it's clear at a glance - a
+        // left-right arrow for a vertical divider, up-down for a horizontal one.
+        Text(
+            text = if (isRow) "↔" else "↕",
+            color = Pink500,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
 }
 
 @Composable

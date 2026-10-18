@@ -53,19 +53,21 @@ fun newNodeId(prefix: String): String {
     return "$prefix-$idCounter-${UUID.randomUUID().toString().take(8)}"
 }
 
-private fun splitChildRects(node: SplitNode, rect: NormalizedRect): Pair<NormalizedRect, NormalizedRect> =
-    when (node.direction) {
+/** Splits this rect into two along [direction] at [fraction] (size of the first part). */
+fun NormalizedRect.splitBy(direction: SplitDirection, fraction: Float): Pair<NormalizedRect, NormalizedRect> =
+    when (direction) {
         SplitDirection.ROW -> {
-            val splitX = rect.left + rect.width * node.fraction
-            NormalizedRect(rect.left, rect.top, splitX, rect.bottom) to
-                NormalizedRect(splitX, rect.top, rect.right, rect.bottom)
+            val splitX = left + width * fraction
+            NormalizedRect(left, top, splitX, bottom) to NormalizedRect(splitX, top, right, bottom)
         }
         SplitDirection.COLUMN -> {
-            val splitY = rect.top + rect.height * node.fraction
-            NormalizedRect(rect.left, rect.top, rect.right, splitY) to
-                NormalizedRect(rect.left, splitY, rect.right, rect.bottom)
+            val splitY = top + height * fraction
+            NormalizedRect(left, top, right, splitY) to NormalizedRect(left, splitY, right, bottom)
         }
     }
+
+private fun splitChildRects(node: SplitNode, rect: NormalizedRect): Pair<NormalizedRect, NormalizedRect> =
+    rect.splitBy(node.direction, node.fraction)
 
 /** Normalized rect for every node in the tree (leaves and internal splits), keyed by id. */
 fun LayoutNode.computeAllRects(bounds: NormalizedRect = FULL_RECT): Map<String, NormalizedRect> {
