@@ -17,7 +17,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -233,7 +232,6 @@ fun PicCollageApp() {
                     pendingAssignBoxId = boxId
                     photoPickerLauncher.launch("image/*")
                 },
-                onRemovePhoto = { boxId -> photosByBoxId.remove(boxId) },
                 onAssignPhoto = { boxId, poolPhotoId ->
                     photoPool.firstOrNull { it.id == poolPhotoId }?.let { photosByBoxId[boxId] = it.state }
                 },
@@ -610,7 +608,10 @@ fun PhotoCell(state: PhotoState, modifier: Modifier) {
         modifier = modifier
             .clipToBounds()
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
+                // Two fingers only (pinch to zoom, two-finger drag to pan) - a
+                // single finger is left for the box's own long-press-to-move
+                // gesture, so the two don't fight over the same drag.
+                detectTwoFingerTransformGestures { pan, zoom ->
                     if (canvasSize.width > 0 && canvasSize.height > 0) {
                         state.zoom = (state.zoom * zoom).coerceIn(1f, 5f)
                         state.panX += pan.x / canvasSize.width

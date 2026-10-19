@@ -5,6 +5,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -47,7 +52,9 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -78,7 +85,6 @@ fun CollageEditorCanvas(
     borderStyle: BorderStyle,
     onTreeChange: (LayoutNode) -> Unit,
     onRequestPhoto: (String) -> Unit,
-    onRemovePhoto: (String) -> Unit,
     onAssignPhoto: (boxId: String, poolPhotoId: String) -> Unit,
     onRequestAddToPool: () -> Unit,
     modifier: Modifier = Modifier
@@ -95,7 +101,7 @@ fun CollageEditorCanvas(
     // Always in the outer Box's coordinate space, since the ghost it drives can
     // travel from the add-handle or photo pool (below the canvas) onto the canvas.
     var ghostPos by remember { mutableStateOf<Offset?>(null) }
-    var hoverTarget by remember { mutableStateOf<Pair<String, QuadrantInsert>?>(null) }
+    var hoverTarget by remember { mutableStateOf<DropTarget?>(null) }
     var isOutOfBounds by remember { mutableStateOf(false) }
 
     fun canvasOriginInOuter(): Offset {
@@ -121,7 +127,9 @@ fun CollageEditorCanvas(
         isOutOfBounds = outside
         hoverTarget = if (outside) null else {
             val norm = (local.x / w) to (local.y / h)
-            findDropTarget(currentRoot.value, norm, excludeLeafId = dragLeafId)
+            // Assigning a photo only ever fills an existing box - there's no
+            // "outer edge" meaning for it, unlike moving or adding a box.
+            findDropTarget(currentRoot.value, norm, excludeLeafId = dragLeafId, allowOuterEdge = dragKind != DragKind.ASSIGN_PHOTO)
         }
     }
 
@@ -146,19 +154,33 @@ fun CollageEditorCanvas(
                         if (currentRoot.value.leafCount() > 1) {
                             currentRoot.value.removingLeaf(leafId)?.let(onTreeChange)
                         }
-                    } else if (target != null && target.first != leafId) {
-                        onTreeChange(currentRoot.value.movingLeaf(leafId, target.first, target.second))
+                    } else when (target) {
+                        is DropTarget.OnLeaf -> if (target.leafId != leafId) {
+                            onTreeChange(currentRoot.value.movingLeaf(leafId, target.leafId, target.insert))
+                        }
+                        is DropTarget.OuterEdge -> {
+                            currentRoot.value.removingLeaf(leafId)?.let { removed ->
+                                onTreeChange(removed.insertingAsOuterSibling(leafId, target.insert))
+                            }
+                        }
+                        null -> {}
                     }
                 }
             }
             DragKind.ADD_BOX -> {
-                if (!isOutOfBounds && target != null) {
-                    onTreeChange(currentRoot.value.insertingAt(target.first, newNodeId("box"), target.second))
+                if (!isOutOfBounds) {
+                    when (target) {
+                        is DropTarget.OnLeaf ->
+                            onTreeChange(currentRoot.value.insertingAt(target.leafId, newNodeId("box"), target.insert))
+                        is DropTarget.OuterEdge ->
+                            onTreeChange(currentRoot.value.insertingAsOuterSibling(newNodeId("box"), target.insert))
+                        null -> {}
+                    }
                 }
             }
             DragKind.ASSIGN_PHOTO -> {
-                if (!isOutOfBounds && target != null && photoId != null) {
-                    onAssignPhoto(target.first, photoId)
+                if (!isOutOfBounds && photoId != null) {
+                    (target as? DropTarget.OnLeaf)?.let { onAssignPhoto(it.leafId, photoId) }
                 }
             }
             null -> {}
@@ -193,7 +215,6 @@ fun CollageEditorCanvas(
                     hoverTarget = hoverTarget,
                     onTreeChange = onTreeChange,
                     onRequestPhoto = onRequestPhoto,
-                    onRemovePhoto = onRemovePhoto,
                     onMoveDragStart = { leafId, startCenterPxCanvasLocal ->
                         dragKind = DragKind.MOVE
                         dragLeafId = leafId
@@ -381,10 +402,9 @@ private fun CollageLayoutBody(
     editable: Boolean,
     movingLeafId: String?,
     dragKind: DragKind?,
-    hoverTarget: Pair<String, QuadrantInsert>?,
+    hoverTarget: DropTarget?,
     onTreeChange: (LayoutNode) -> Unit,
     onRequestPhoto: (String) -> Unit,
-    onRemovePhoto: (String) -> Unit,
     onMoveDragStart: (String, Offset) -> Unit,
     onMoveDrag: (Offset) -> Unit,
     onMoveDragEnd: () -> Unit
@@ -426,7 +446,6 @@ private fun CollageLayoutBody(
                     state = photosByBoxId[leafId],
                     editable = editable,
                     onRequestPhoto = onRequestPhoto,
-                    onRemovePhoto = onRemovePhoto,
                     onMoveDragStart = { onMoveDragStart(leafId, centerPxState.value) },
                     onMoveDrag = onMoveDrag,
                     onMoveDragEnd = onMoveDragEnd,
@@ -451,36 +470,70 @@ private fun CollageLayoutBody(
             }
         }
 
-        if (editable && hoverTarget != null) {
-            val (targetId, insert) = hoverTarget
-            val targetRect = leafRects[targetId]
-            if (targetRect != null) {
-                if (dragKind == DragKind.ASSIGN_PHOTO) {
-                    // Assigning a photo doesn't reshape the layout - just highlight
-                    // the whole box it will land in.
-                    val targetPx = targetRect.toPixelRectWithBorder(wPx, hPx, borderPxPx)
-                    PixelRectOverlay(
-                        targetPx,
-                        density,
-                        Modifier.border(3.dp, Pink500, RoundedCornerShape(6.dp))
-                    )
-                } else {
-                    // Ghost split preview: shows exactly how the hovered box will divide -
-                    // the new box's landing spot in pink, the existing box's new, smaller
-                    // footprint outlined - before the drag is dropped.
-                    val (firstNorm, secondNorm) = targetRect.splitBy(insert.direction, 0.5f)
-                    val newBoxNorm = if (insert.newFirst) firstNorm else secondNorm
-                    val remainingNorm = if (insert.newFirst) secondNorm else firstNorm
-                    val newBoxPx = newBoxNorm.toPixelRectWithBorder(wPx, hPx, borderPxPx)
-                    val remainingPx = remainingNorm.toPixelRectWithBorder(wPx, hPx, borderPxPx)
+        if (editable) {
+            when (val target = hoverTarget) {
+                null -> {}
+                is DropTarget.OnLeaf -> {
+                    val targetRect = leafRects[target.leafId]
+                    if (targetRect != null) {
+                        if (dragKind == DragKind.ASSIGN_PHOTO) {
+                            // Assigning a photo doesn't reshape the layout - just highlight
+                            // the whole box it will land in.
+                            val targetPx = targetRect.toPixelRectWithBorder(wPx, hPx, borderPxPx)
+                            PixelRectOverlay(
+                                targetPx,
+                                density,
+                                Modifier.border(3.dp, Pink500, RoundedCornerShape(6.dp))
+                            )
+                        } else {
+                            // Ghost split preview: shows exactly how the hovered box will divide -
+                            // the new box's landing spot in pink, the existing box's new, smaller
+                            // footprint outlined - before the drag is dropped.
+                            val (firstNorm, secondNorm) = targetRect.splitBy(target.insert.direction, 0.5f)
+                            val newBoxNorm = if (target.insert.newFirst) firstNorm else secondNorm
+                            val remainingNorm = if (target.insert.newFirst) secondNorm else firstNorm
+                            val newBoxPx = newBoxNorm.toPixelRectWithBorder(wPx, hPx, borderPxPx)
+                            val remainingPx = remainingNorm.toPixelRectWithBorder(wPx, hPx, borderPxPx)
 
+                            PixelRectOverlay(
+                                remainingPx,
+                                density,
+                                Modifier.border(2.dp, Color.White.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                            )
+                            PixelRectOverlay(
+                                newBoxPx,
+                                density,
+                                Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Pink500.copy(alpha = 0.45f))
+                                    .border(2.dp, Pink500, RoundedCornerShape(6.dp))
+                            )
+                        }
+                    }
+                }
+                is DropTarget.OuterEdge -> {
+                    // A new row/column alongside everything else, not nested inside
+                    // any single box - shown spanning the whole relevant edge.
+                    val fraction = OUTER_EDGE_INSERT_FRACTION
+                    val (newBoxNorm, remainingNorm) = when (target.insert.direction) {
+                        SplitDirection.ROW -> if (target.insert.newFirst) {
+                            NormalizedRect(0f, 0f, fraction, 1f) to NormalizedRect(fraction, 0f, 1f, 1f)
+                        } else {
+                            NormalizedRect(1f - fraction, 0f, 1f, 1f) to NormalizedRect(0f, 0f, 1f - fraction, 1f)
+                        }
+                        SplitDirection.COLUMN -> if (target.insert.newFirst) {
+                            NormalizedRect(0f, 0f, 1f, fraction) to NormalizedRect(0f, fraction, 1f, 1f)
+                        } else {
+                            NormalizedRect(0f, 1f - fraction, 1f, 1f) to NormalizedRect(0f, 0f, 1f, 1f - fraction)
+                        }
+                    }
                     PixelRectOverlay(
-                        remainingPx,
+                        remainingNorm.toPixelRectWithBorder(wPx, hPx, borderPxPx),
                         density,
                         Modifier.border(2.dp, Color.White.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
                     )
                     PixelRectOverlay(
-                        newBoxPx,
+                        newBoxNorm.toPixelRectWithBorder(wPx, hPx, borderPxPx),
                         density,
                         Modifier
                             .clip(RoundedCornerShape(6.dp))
@@ -565,9 +618,9 @@ private fun ResizeHandle(
         // which way this handle drags: left-right for a vertical divider,
         // up-down for a horizontal one.
         Canvas(Modifier.fillMaxSize()) {
-            val strokeWidth = 2.5.dp.toPx()
-            val armLength = size.minDimension * 0.3f
-            val headSize = size.minDimension * 0.18f
+            val strokeWidth = 2.dp.toPx()
+            val armLength = size.minDimension * 0.24f
+            val headSize = size.minDimension * 0.14f
             val c = Offset(size.width / 2f, size.height / 2f)
             if (isRow) {
                 drawLine(Pink500, Offset(c.x - armLength, c.y), Offset(c.x + armLength, c.y), strokeWidth, cap = StrokeCap.Round)
@@ -618,7 +671,6 @@ private fun PhotoCellBox(
     state: PhotoState?,
     editable: Boolean,
     onRequestPhoto: (String) -> Unit,
-    onRemovePhoto: (String) -> Unit,
     onMoveDragStart: () -> Unit,
     onMoveDrag: (Offset) -> Unit,
     onMoveDragEnd: () -> Unit,
@@ -664,39 +716,6 @@ private fun PhotoCellBox(
     ) {
         if (state != null) {
             PhotoCell(state = state, modifier = Modifier.fillMaxSize())
-            Row(
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .clickable {
-                            val matrix = android.graphics.Matrix().apply { postRotate(90f) }
-                            state.bitmap = android.graphics.Bitmap.createBitmap(
-                                state.bitmap, 0, 0, state.bitmap.width, state.bitmap.height, matrix, true
-                            )
-                            state.panX = 0f
-                            state.panY = 0f
-                            state.zoom = 1f
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("↻", color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .clickable { onRemovePhoto(boxId) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("✕", color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
         } else {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Box(
@@ -707,6 +726,51 @@ private fun PhotoCellBox(
                 }
             }
         }
+    }
+}
+
+/**
+ * Like [androidx.compose.foundation.gestures.detectTransformGestures], but only
+ * reacts once a second finger is down. A single finger is left completely
+ * alone (never consumed), so it falls through to a sibling gesture on the
+ * parent - here, long-press-and-drag to move the whole box. Framing a photo
+ * (pinch to zoom, two-finger drag to pan) and moving the box it's in would
+ * otherwise both be "drag on the photo", with no way to tell them apart.
+ */
+suspend fun PointerInputScope.detectTwoFingerTransformGestures(
+    onGesture: (pan: Offset, zoom: Float) -> Unit
+) {
+    awaitEachGesture {
+        var zoom = 1f
+        var pan = Offset.Zero
+        var pastTouchSlop = false
+        val touchSlop = viewConfiguration.touchSlop
+
+        awaitFirstDown(requireUnconsumed = false)
+        do {
+            val event = awaitPointerEvent()
+            val canceled = event.changes.any { it.isConsumed }
+            if (!canceled && event.changes.size >= 2) {
+                val zoomChange = event.calculateZoom()
+                val panChange = event.calculatePan()
+
+                if (!pastTouchSlop) {
+                    zoom *= zoomChange
+                    pan += panChange
+                    val centroidSize = event.calculateCentroidSize(useCurrent = false)
+                    val zoomMotion = kotlin.math.abs(1 - zoom) * centroidSize
+                    val panMotion = pan.getDistance()
+                    if (zoomMotion > touchSlop || panMotion > touchSlop) {
+                        pastTouchSlop = true
+                    }
+                }
+
+                if (pastTouchSlop && (zoomChange != 1f || panChange != Offset.Zero)) {
+                    onGesture(panChange, zoomChange)
+                    event.changes.forEach { if (it.positionChanged()) it.consume() }
+                }
+            }
+        } while (!canceled && event.changes.any { it.pressed })
     }
 }
 
