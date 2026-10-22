@@ -265,13 +265,15 @@ fun CollageEditorCanvas(
                         .onGloballyPositioned { gridCoords = it },
                     onTreeChange = onTreeChange,
                     onRequestPhoto = onRequestPhoto,
-                    onMoveDragStart = { leafId, startCenterPxGridLocal ->
+                    onMoveDragStart = { leafId, touchPosGridLocal ->
                         dragKind = DragKind.MOVE
                         dragLeafId = leafId
                         val oc = outerCoords
                         val gc = gridCoords
                         if (oc != null && gc != null) {
-                            updateGhost(oc.localPositionOf(gc, startCenterPxGridLocal))
+                            // Start the ghost exactly where the thumb is, not the
+                            // box's center, so it doesn't jump at the start of a drag.
+                            updateGhost(oc.localPositionOf(gc, touchPosGridLocal))
                         }
                     },
                     onMoveDrag = { delta -> ghostPos?.let { updateGhost(it + delta) } },
@@ -479,8 +481,12 @@ private fun CollageLayoutBody(
                 rect.toPixelRectWithBorder(wPx, hPx, borderPxPx)
             }
             val isMoving = editable && movingLeafId == leafId
-            val centerPx = Offset(px.left + px.width / 2f, px.top + px.height / 2f)
-            val centerPxState = rememberUpdatedState(centerPx)
+            // The box's own top-left in grid-local space, so the long-press's
+            // position within the box (passed up from PhotoCellBox) can be
+            // translated to grid-local - the ghost then starts exactly under
+            // the thumb, not snapped to the box's center.
+            val topLeftPx = Offset(px.left, px.top)
+            val topLeftPxState = rememberUpdatedState(topLeftPx)
 
             Box(
                 Modifier
@@ -500,7 +506,9 @@ private fun CollageLayoutBody(
                     state = photosByBoxId[leafId],
                     editable = editable,
                     onRequestPhoto = onRequestPhoto,
-                    onMoveDragStart = { onMoveDragStart(leafId, centerPxState.value) },
+                    onMoveDragStart = { touchLocalToBox ->
+                        onMoveDragStart(leafId, topLeftPxState.value + touchLocalToBox)
+                    },
                     onMoveDrag = onMoveDrag,
                     onMoveDragEnd = onMoveDragEnd,
                     modifier = Modifier.fillMaxSize()
@@ -725,7 +733,7 @@ private fun PhotoCellBox(
     state: PhotoState?,
     editable: Boolean,
     onRequestPhoto: (String) -> Unit,
-    onMoveDragStart: () -> Unit,
+    onMoveDragStart: (Offset) -> Unit,
     onMoveDrag: (Offset) -> Unit,
     onMoveDragEnd: () -> Unit,
     modifier: Modifier
@@ -754,9 +762,9 @@ private fun PhotoCellBox(
                         }
                         .pointerInput(boxId) {
                             detectDragGesturesAfterLongPress(
-                                onDragStart = {
+                                onDragStart = { touchPos ->
                                     suppressNextTap = true
-                                    onMoveDragStart()
+                                    onMoveDragStart(touchPos)
                                 },
                                 onDrag = { change, amount -> change.consume(); onMoveDrag(amount) },
                                 onDragEnd = { onMoveDragEnd() },
