@@ -235,37 +235,28 @@ sealed interface DropTarget {
     data class OuterEdge(val insert: QuadrantInsert) : DropTarget
 }
 
-/** How close to the canvas's outer edge (as a fraction of its size) a drop counts
- *  as "add a new row/column alongside everything" rather than "inside this box". */
-const val OUTER_EDGE_ZONE_FRACTION = 0.12f
-
-private fun nearestEdgeInsert(relLeft: Float, relRight: Float, relTop: Float, relBottom: Float): Pair<Float, QuadrantInsert> {
+private fun nearestEdgeInsert(relLeft: Float, relRight: Float, relTop: Float, relBottom: Float): QuadrantInsert {
     val minDist = minOf(relLeft, relRight, relTop, relBottom)
-    val insert = when (minDist) {
+    return when (minDist) {
         relLeft -> QuadrantInsert(SplitDirection.ROW, newFirst = true)
         relRight -> QuadrantInsert(SplitDirection.ROW, newFirst = false)
         relTop -> QuadrantInsert(SplitDirection.COLUMN, newFirst = true)
         else -> QuadrantInsert(SplitDirection.COLUMN, newFirst = false)
     }
-    return minDist to insert
 }
 
 /**
- * Where [pos] (0..1 canvas-normalized) would drop: near the canvas's outer edge
- * (when [allowOuterEdge] is true) becomes [DropTarget.OuterEdge]; otherwise the
- * leaf under the point, with where in it, becomes [DropTarget.OnLeaf].
+ * Which leaf (if any) [pos] (0..1, normalized to the box grid itself - callers
+ * are responsible for excluding the outer padding ring before normalizing)
+ * would drop onto, and where within it, as [DropTarget.OnLeaf]. The outer-edge
+ * case ([DropTarget.OuterEdge]) is decided by the caller in pixel space, since
+ * it depends on a fixed-size padding ring around the grid, not a fraction of it.
  */
 fun findDropTarget(
     root: LayoutNode,
     pos: Pair<Float, Float>,
-    excludeLeafId: String? = null,
-    allowOuterEdge: Boolean = true
-): DropTarget? {
-    if (allowOuterEdge) {
-        val (minDist, insert) = nearestEdgeInsert(pos.first, 1f - pos.first, pos.second, 1f - pos.second)
-        if (minDist <= OUTER_EDGE_ZONE_FRACTION) return DropTarget.OuterEdge(insert)
-    }
-
+    excludeLeafId: String? = null
+): DropTarget.OnLeaf? {
     val rects = root.computeRects()
     val targetId = root.leafIds()
         .filter { it != excludeLeafId }
@@ -274,6 +265,6 @@ fun findDropTarget(
     val r = rects[targetId] ?: return null
     val relX = if (r.width > 0f) (pos.first - r.left) / r.width else 0.5f
     val relY = if (r.height > 0f) (pos.second - r.top) / r.height else 0.5f
-    val (_, insert) = nearestEdgeInsert(relX, 1f - relX, relY, 1f - relY)
+    val insert = nearestEdgeInsert(relX, 1f - relX, relY, 1f - relY)
     return DropTarget.OnLeaf(targetId, insert)
 }

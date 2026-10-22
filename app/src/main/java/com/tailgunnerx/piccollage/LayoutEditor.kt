@@ -67,6 +67,11 @@ import androidx.compose.ui.unit.sp
 
 private enum class DragKind { MOVE, ADD_BOX, ASSIGN_PHOTO }
 
+/** A fixed-size margin around the box grid, visually and functionally distinct
+ *  from any box's own interior: a drop here always means "new row/column
+ *  alongside everything", never "inside whichever box happens to be here". */
+private val CanvasOuterPadding = 24.dp
+
 /**
  * The interactive collage canvas: every box can be dragged (long-press, then
  * drag) to a new spot, resized via the handles on shared dividers (the
@@ -90,9 +95,14 @@ fun CollageEditorCanvas(
     modifier: Modifier = Modifier
 ) {
     val currentRoot = rememberUpdatedState(root)
+    val density = LocalDensity.current
 
     var outerCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var canvasCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // The box grid's own coordinates - inset within canvasCoords by CanvasOuterPadding,
+    // so a position reported relative to it (e.g. a box's center) needs this, not
+    // canvasCoords, to land in the right place once converted to outer-space.
+    var gridCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var addHandleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     var dragKind by remember { mutableStateOf<DragKind?>(null) }
@@ -119,17 +129,54 @@ fun CollageEditorCanvas(
     fun updateGhost(posInOuterPx: Offset) {
         ghostPos = posInOuterPx
         val cCoords = canvasCoords ?: return
-        val w = cCoords.size.width.toFloat()
-        val h = cCoords.size.height.toFloat()
-        if (w <= 0f || h <= 0f) return
+        val fullW = cCoords.size.width.toFloat()
+        val fullH = cCoords.size.height.toFloat()
+        if (fullW <= 0f || fullH <= 0f) return
         val local = posInOuterPx - canvasOriginInOuter()
-        val outside = local.x !in 0f..w || local.y !in 0f..h
+        val outside = local.x !in 0f..fullW || local.y !in 0f..fullH
         isOutOfBounds = outside
-        hoverTarget = if (outside) null else {
-            val norm = (local.x / w) to (local.y / h)
+        if (outside) {
+            hoverTarget = null
+            return
+        }
+
+        // The box grid itself is inset by a fixed padding from the canvas's own
+        // bounds (see CanvasOuterPadding) - a drop in that padding ring always
+        // means "new row/column alongside everything", with no ambiguity about
+        // whether it's inside whichever box happens to be near that edge.
+        val padPx = with(density) { CanvasOuterPadding.toPx() }
+        val gridLeft = padPx
+        val gridTop = padPx
+        val gridRight = (fullW - padPx).coerceAtLeast(gridLeft)
+        val gridBottom = (fullH - padPx).coerceAtLeast(gridTop)
+        val inGrid = local.x in gridLeft..gridRight && local.y in gridTop..gridBottom
+
+        hoverTarget = if (!inGrid) {
             // Assigning a photo only ever fills an existing box - there's no
             // "outer edge" meaning for it, unlike moving or adding a box.
-            findDropTarget(currentRoot.value, norm, excludeLeafId = dragLeafId, allowOuterEdge = dragKind != DragKind.ASSIGN_PHOTO)
+            if (dragKind == DragKind.ASSIGN_PHOTO) null
+            else {
+                val overLeft = (gridLeft - local.x).coerceAtLeast(0f)
+                val overRight = (local.x - gridRight).coerceAtLeast(0f)
+                val overTop = (gridTop - local.y).coerceAtLeast(0f)
+                val overBottom = (local.y - gridBottom).coerceAtLeast(0f)
+                val maxOver = maxOf(overLeft, overRight, overTop, overBottom)
+                val insert = when (maxOver) {
+                    overLeft -> QuadrantInsert(SplitDirection.ROW, newFirst = true)
+                    overRight -> QuadrantInsert(SplitDirection.ROW, newFirst = false)
+                    overTop -> QuadrantInsert(SplitDirection.COLUMN, newFirst = true)
+                    else -> QuadrantInsert(SplitDirection.COLUMN, newFirst = false)
+                }
+                DropTarget.OuterEdge(insert)
+            }
+        } else {
+            val gridW = gridRight - gridLeft
+            val gridH = gridBottom - gridTop
+            if (gridW <= 0f || gridH <= 0f) null
+            else {
+                val norm = ((local.x - gridLeft) / gridW) to ((local.y - gridTop) / gridH)
+                findDropTarget(currentRoot.value, norm, excludeLeafId = dragLeafId)
+            }
         }
     }
 
@@ -213,12 +260,19 @@ fun CollageEditorCanvas(
                     movingLeafId = dragLeafId,
                     dragKind = dragKind,
                     hoverTarget = hoverTarget,
+                    modifier = Modifier
+                        .padding(CanvasOuterPadding)
+                        .onGloballyPositioned { gridCoords = it },
                     onTreeChange = onTreeChange,
                     onRequestPhoto = onRequestPhoto,
-                    onMoveDragStart = { leafId, startCenterPxCanvasLocal ->
+                    onMoveDragStart = { leafId, startCenterPxGridLocal ->
                         dragKind = DragKind.MOVE
                         dragLeafId = leafId
-                        updateGhost(canvasOriginInOuter() + startCenterPxCanvasLocal)
+                        val oc = outerCoords
+                        val gc = gridCoords
+                        if (oc != null && gc != null) {
+                            updateGhost(oc.localPositionOf(gc, startCenterPxGridLocal))
+                        }
                     },
                     onMoveDrag = { delta -> ghostPos?.let { updateGhost(it + delta) } },
                     onMoveDragEnd = { commitDrag() }
@@ -295,7 +349,6 @@ fun CollageEditorCanvas(
         // Ghost preview following the finger while a move/add/assign drag is active.
         val ghost = ghostPos
         if (dragKind != null && ghost != null) {
-            val density = LocalDensity.current
             val ghostSize = 56.dp
             val ghostSizePx = with(density) { ghostSize.toPx() }
             val pos = ghost - Offset(ghostSizePx / 2f, ghostSizePx / 2f)
@@ -407,12 +460,13 @@ private fun CollageLayoutBody(
     onRequestPhoto: (String) -> Unit,
     onMoveDragStart: (String, Offset) -> Unit,
     onMoveDrag: (Offset) -> Unit,
-    onMoveDragEnd: () -> Unit
+    onMoveDragEnd: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
     val currentRoot = rememberUpdatedState(root)
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
         val wPx = constraints.maxWidth.toFloat()
         val hPx = constraints.maxHeight.toFloat()
         val borderPxPx = with(density) { borderPx.dp.toPx() }
