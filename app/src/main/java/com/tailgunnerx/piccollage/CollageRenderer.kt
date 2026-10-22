@@ -25,13 +25,14 @@ data class PhotoData(
 )
 
 /**
- * Renders the selected collage layout to a Bitmap at the given [outputSize],
- * then saves it to the device gallery and returns the saved Uri.
+ * Renders the current (possibly user-edited) collage layout tree to a Bitmap
+ * at the given [outputSize], then saves it to the device gallery and returns
+ * the saved Uri.
  */
 suspend fun renderAndSaveCollage(
     context: Context,
-    type: CollageType,
-    photos: List<PhotoData>,
+    layout: LayoutNode,
+    photosByBoxId: Map<String, PhotoData>,
     outputSize: IntSize = IntSize(1080, 1080),
     borderPx: Int = 8,
     borderStyle: BorderStyle = BorderStyle.SolidColor(androidx.compose.ui.graphics.Color.White)
@@ -65,7 +66,6 @@ suspend fun renderAndSaveCollage(
     val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     // Scale borderPx based on the ratio of Output Width vs standard 360dp screen width
     val bp = (borderPx * (W / 360f)).toInt()
-    val halfBp = bp / 2
 
     fun drawPhoto(state: PhotoData, dst: Rect) {
         val bmp = state.bitmap
@@ -99,83 +99,14 @@ suspend fun renderAndSaveCollage(
         canvas.drawBitmap(bmp, src, dst, paint)
     }
 
-    val b = photos
-    when (type) {
-
-        // ── 2 photos ─────────────────────────────────────────────────────────
-        CollageType.SPLIT_VERTICAL -> {
-            val mid = W / 2
-            drawPhoto(b[0], Rect(bp, bp, mid - halfBp, H - bp))
-            drawPhoto(b[1], Rect(mid + halfBp, bp, W - bp, H - bp))
-        }
-        CollageType.SPLIT_HORIZONTAL -> {
-            val mid = H / 2
-            drawPhoto(b[0], Rect(bp, bp, W - bp, mid - halfBp))
-            drawPhoto(b[1], Rect(bp, mid + halfBp, W - bp, H - bp))
-        }
-
-        // ── 3 photos ─────────────────────────────────────────────────────────
-        CollageType.BIG_LEFT -> {
-            val split = (W * 0.55f).toInt()
-            val midY = H / 2
-            drawPhoto(b[0], Rect(bp, bp, split - halfBp, H - bp))
-            drawPhoto(b[1], Rect(split + halfBp, bp, W - bp, midY - halfBp))
-            drawPhoto(b[2], Rect(split + halfBp, midY + halfBp, W - bp, H - bp))
-        }
-        CollageType.BIG_RIGHT -> {
-            val split = (W * 0.45f).toInt()
-            val midY = H / 2
-            drawPhoto(b[0], Rect(bp, bp, split - halfBp, midY - halfBp))
-            drawPhoto(b[1], Rect(bp, midY + halfBp, split - halfBp, H - bp))
-            drawPhoto(b[2], Rect(split + halfBp, bp, W - bp, H - bp))
-        }
-
-        // ── 4 photos ─────────────────────────────────────────────────────────
-        CollageType.GRID_2X2 -> {
-            val midX = W / 2; val midY = H / 2
-            drawPhoto(b[0], Rect(bp, bp, midX - halfBp, midY - halfBp))
-            drawPhoto(b[1], Rect(midX + halfBp, bp, W - bp, midY - halfBp))
-            drawPhoto(b[2], Rect(bp, midY + halfBp, midX - halfBp, H - bp))
-            drawPhoto(b[3], Rect(midX + halfBp, midY + halfBp, W - bp, H - bp))
-        }
-        CollageType.BIG_TOP -> {
-            val splitY = (H * 0.55f).toInt()
-            val t1 = W / 3; val t2 = (W * 2f / 3f).toInt()
-            drawPhoto(b[0], Rect(bp, bp, W - bp, splitY - halfBp))
-            drawPhoto(b[1], Rect(bp, splitY + halfBp, t1 - halfBp, H - bp))
-            drawPhoto(b[2], Rect(t1 + halfBp, splitY + halfBp, t2 - halfBp, H - bp))
-            drawPhoto(b[3], Rect(t2 + halfBp, splitY + halfBp, W - bp, H - bp))
-        }
-        CollageType.BIG_BOTTOM -> {
-            val splitY = (H * 0.45f).toInt()
-            val t1 = W / 3; val t2 = (W * 2f / 3f).toInt()
-            drawPhoto(b[0], Rect(bp, bp, t1 - halfBp, splitY - halfBp))
-            drawPhoto(b[1], Rect(t1 + halfBp, bp, t2 - halfBp, splitY - halfBp))
-            drawPhoto(b[2], Rect(t2 + halfBp, bp, W - bp, splitY - halfBp))
-            drawPhoto(b[3], Rect(bp, splitY + halfBp, W - bp, H - bp))
-        }
-
-        // ── 5 photos ─────────────────────────────────────────────────────────
-        CollageType.GRID_ASYMMETRIC -> {
-            val midX = W / 2; val midY = (H * 0.55f).toInt()
-            val t1 = W / 3; val t2 = (W * 2f / 3f).toInt()
-            drawPhoto(b[0], Rect(bp, bp, midX - halfBp, midY - halfBp))
-            drawPhoto(b[1], Rect(midX + halfBp, bp, W - bp, midY - halfBp))
-            drawPhoto(b[2], Rect(bp, midY + halfBp, t1 - halfBp, H - bp))
-            drawPhoto(b[3], Rect(t1 + halfBp, midY + halfBp, t2 - halfBp, H - bp))
-            drawPhoto(b[4], Rect(t2 + halfBp, midY + halfBp, W - bp, H - bp))
-        }
-
-        // ── 6 photos ─────────────────────────────────────────────────────────
-        CollageType.GRID_2X3 -> {
-            val midX = W / 2; val r1 = H / 3; val r2 = (H * 2f / 3f).toInt()
-            drawPhoto(b[0], Rect(bp, bp, midX - halfBp, r1 - halfBp))
-            drawPhoto(b[1], Rect(midX + halfBp, bp, W - bp, r1 - halfBp))
-            drawPhoto(b[2], Rect(bp, r1 + halfBp, midX - halfBp, r2 - halfBp))
-            drawPhoto(b[3], Rect(midX + halfBp, r1 + halfBp, W - bp, r2 - halfBp))
-            drawPhoto(b[4], Rect(bp, r2 + halfBp, midX - halfBp, H - bp))
-            drawPhoto(b[5], Rect(midX + halfBp, r2 + halfBp, W - bp, H - bp))
-        }
+    val leafRects = layout.computeRects()
+    for ((boxId, normRect) in leafRects) {
+        val photo = photosByBoxId[boxId] ?: continue
+        val px = normRect.toPixelRectWithBorder(W.toFloat(), H.toFloat(), bp.toFloat())
+        drawPhoto(
+            photo,
+            Rect(px.left.toInt(), px.top.toInt(), px.right.toInt(), px.bottom.toInt())
+        )
     }
 
     // Save to gallery

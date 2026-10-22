@@ -9,7 +9,7 @@ on:
     # `closed` runs the release cleanup, the other types run the build. Keep all four.
     types: [opened, reopened, synchronize, closed]
     branches:
-      - main   # CONFIGURE: the branch(es) your PRs target
+      - master   # CONFIGURE: the branch(es) your PRs target
 
 permissions:
   contents: write       # create the release that holds the APK, and delete it again

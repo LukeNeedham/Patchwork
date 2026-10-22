@@ -17,7 +17,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -49,6 +48,7 @@ import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 // ─── Palette ────────────────────────────────────────────────────────────────
 val Pink500   = Color(0xFFE91E8C)
@@ -78,6 +78,9 @@ class PhotoState(initialBitmap: Bitmap) {
     fun toPhotoData() = PhotoData(bitmap, panX, panY, zoom)
 }
 
+/** A photo in the user's pool, independent of whether (or where) it's placed in the layout. */
+data class PoolPhoto(val id: String, val state: PhotoState)
+
 // ─── Activity ────────────────────────────────────────────────────────────────
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,31 +95,58 @@ class MainActivity : ComponentActivity() {
 // ─── Root composable ─────────────────────────────────────────────────────────
 @Composable
 fun PicCollageApp() {
-    var selectedType by remember { mutableStateOf(CollageType.GRID_2X2) }
-    val photos = remember { mutableStateListOf<PhotoState?>() }
+    val initialTemplate = defaultTemplates.first { it.id == "grid_2x2" }
+    var root by remember { mutableStateOf(initialTemplate.tree) }
+    var selectedTemplateId by remember { mutableStateOf(initialTemplate.id) }
+    val photosByBoxId = remember { mutableStateMapOf<String, PhotoState>() }
+    val photoPool = remember { mutableStateListOf<PoolPhoto>() }
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
     var isSaving by remember { mutableStateOf(false) }
     var borderPx by remember { mutableStateOf(8f) }
     var borderStyle by remember { mutableStateOf<BorderStyle>(BorderStyle.SolidColor(Color.White)) }
 
-    val requiredCount = selectedType.photoCount
-    val previewBitmaps = List(requiredCount) { photos.getOrNull(it) }
+    // Set before launching the picker: which box (if any) the newly-picked
+    // photo should also be assigned to, besides being added to the pool.
+    var pendingAssignBoxId by remember { mutableStateOf<String?>(null) }
 
-    var activeIndexToFill by remember { mutableStateOf(-1) }
+    fun applyTreeChange(newRoot: LayoutNode) {
+        root = newRoot
+        val validIds = newRoot.leafIds().toSet()
+        photosByBoxId.keys.filter { it !in validIds }.forEach { photosByBoxId.remove(it) }
+    }
 
-    // Single-photo picker launcher
+    fun applyTemplate(template: CollageTemplate) {
+        // Carry existing photos across to the new shape, in the same order,
+        // so switching templates doesn't throw away what's already picked.
+        val oldPhotosInOrder = root.leafIds().mapNotNull { photosByBoxId[it] }
+        val newLeafIds = template.tree.leafIds()
+        val remapped = LinkedHashMap<String, PhotoState>()
+        newLeafIds.forEachIndexed { i, id -> oldPhotosInOrder.getOrNull(i)?.let { remapped[id] = it } }
+        photosByBoxId.clear()
+        photosByBoxId.putAll(remapped)
+        root = template.tree
+        selectedTemplateId = template.id
+    }
+
+    // Single-photo picker launcher. Every picked photo joins the pool; if it
+    // was requested from a specific box (rather than the pool's own "+" tile),
+    // it's also assigned there directly.
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        if (uri != null && activeIndexToFill in 0 until requiredCount) {
+        val assignBoxId = pendingAssignBoxId
+        if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 try {
                     context.contentResolver.openInputStream(uri)?.use { stream ->
                         val bmp = BitmapFactory.decodeStream(stream)
                         withContext(Dispatchers.Main) {
-                            while (photos.size <= activeIndexToFill) photos.add(null)
-                            photos[activeIndexToFill] = PhotoState(bmp)
+                            val poolPhoto = PoolPhoto(UUID.randomUUID().toString(), PhotoState(bmp))
+                            photoPool.add(poolPhoto)
+                            if (assignBoxId != null) {
+                                photosByBoxId[assignBoxId] = poolPhoto.state
+                            }
                         }
                     }
                 } catch (_: Exception) {}
@@ -159,7 +189,7 @@ fun PicCollageApp() {
 
             // ── Layout picker ────────────────────────────────────────────────
             Text(
-                "Choose a Layout",
+                "Choose a Starting Layout",
                 color = Subtle,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
@@ -170,44 +200,49 @@ fun PicCollageApp() {
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(CollageType.entries) { type ->
+                items(defaultTemplates) { template ->
                     LayoutChip(
-                        type = type,
-                        isSelected = type == selectedType,
-                        onClick = { selectedType = type }
+                        template = template,
+                        isSelected = template.id == selectedTemplateId,
+                        onClick = { applyTemplate(template) }
                     )
                 }
             }
+            Text(
+                "Long-press a box to move or remove it, drag edges to resize, tap a box or drag a photo in to fill it",
+                color = Subtle,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)
+            )
 
             Spacer(Modifier.height(18.dp))
 
-            // ── Preview canvas ───────────────────────────────────────────────
+            // ── Preview / editor canvas ─────────────────────────────────────────
 
-            Box(
+            // CollageEditorCanvas sizes itself: the square canvas, the "drag to
+            // add" handle, and the photo pool, so no aspectRatio here.
+            CollageEditorCanvas(
+                root = root,
+                photosByBoxId = photosByBoxId,
+                photoPool = photoPool,
+                borderPx = borderPx,
+                borderStyle = borderStyle,
+                onTreeChange = ::applyTreeChange,
+                onRequestPhoto = { boxId ->
+                    pendingAssignBoxId = boxId
+                    photoPickerLauncher.launch("image/*")
+                },
+                onAssignPhoto = { boxId, poolPhotoId ->
+                    photoPool.firstOrNull { it.id == poolPhotoId }?.let { photosByBoxId[boxId] = it.state }
+                },
+                onRequestAddToPool = {
+                    pendingAssignBoxId = null
+                    photoPickerLauncher.launch("image/*")
+                },
                 modifier = Modifier
                     .padding(horizontal = 20.dp)
                     .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Dark800),
-                contentAlignment = Alignment.Center
-            ) {
-                CollagePreview(
-                    type = selectedType,
-                    photos = previewBitmaps,
-                    borderPx = borderPx,
-                    borderStyle = borderStyle,
-                    onAddPhoto = { index ->
-                        activeIndexToFill = index
-                        photoPickerLauncher.launch("image/*")
-                    },
-                    onRemovePhoto = { index ->
-                        if (index < photos.size) {
-                            photos[index] = null
-                        }
-                    }
-                )
-            }
+            )
 
             Spacer(Modifier.height(14.dp))
 
@@ -376,7 +411,8 @@ fun PicCollageApp() {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Save collage
-                val canSave = previewBitmaps.all { it != null } && !isSaving
+                val leafIds = root.leafIds()
+                val canSave = leafIds.isNotEmpty() && leafIds.all { photosByBoxId.containsKey(it) } && !isSaving
                 Button(
                     onClick = {
                         if (!canSave) return@Button
@@ -385,8 +421,8 @@ fun PicCollageApp() {
                             try {
                                 val uri = renderAndSaveCollage(
                                     context = context,
-                                    type = selectedType,
-                                    photos = previewBitmaps.filterNotNull().map { it.toPhotoData() },
+                                    layout = root,
+                                    photosByBoxId = photosByBoxId.mapValues { it.value.toPhotoData() },
                                     borderPx = borderPx.toInt(),
                                     borderStyle = borderStyle
                                 )
@@ -522,8 +558,10 @@ fun ColorSpectrumPicker(
 }
 
 // ─── Layout chip ─────────────────────────────────────────────────────────────
+// The chip picks a *starting* shape - every box in it stays fully editable
+// afterwards (move / resize / add / remove), so this only seeds the tree.
 @Composable
-fun LayoutChip(type: CollageType, isSelected: Boolean, onClick: () -> Unit) {
+fun LayoutChip(template: CollageTemplate, isSelected: Boolean, onClick: () -> Unit) {
     val bgColor by animateColorAsState(
         if (isSelected) Pink500 else Dark700,
         animationSpec = tween(200), label = "chip_bg"
@@ -532,6 +570,7 @@ fun LayoutChip(type: CollageType, isSelected: Boolean, onClick: () -> Unit) {
         if (isSelected) 1.06f else 1f,
         animationSpec = tween(200), label = "chip_scale"
     )
+    val cellColor = if (isSelected) Color.White.copy(alpha = 0.35f) else Color(0xFF3A3A55)
     Column(
         modifier = Modifier
             .scale(scale)
@@ -541,300 +580,24 @@ fun LayoutChip(type: CollageType, isSelected: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        LayoutThumbnail(type = type, isSelected = isSelected)
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (isSelected) Color.White.copy(alpha = 0.15f) else Dark900)
+                .padding(3.dp)
+        ) {
+            LayoutTreeThumbnail(node = template.tree, cellColor = cellColor, gap = 2.dp, modifier = Modifier.fillMaxSize())
+        }
         Spacer(Modifier.height(6.dp))
         Text(
-            type.displayName,
+            template.displayName,
             color = White,
             fontSize = 10.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-    }
-}
-
-// ─── Mini thumbnail showing the grid shape ───────────────────────────────────
-@Composable
-fun LayoutThumbnail(type: CollageType, isSelected: Boolean) {
-    val cellColor = if (isSelected) Color.White.copy(alpha = 0.35f) else Color(0xFF3A3A55)
-    val size = 48.dp
-    val gap = 2.dp
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(RoundedCornerShape(6.dp))
-            .background(if (isSelected) Color.White.copy(alpha = 0.15f) else Dark900)
-    ) {
-        when (type) {
-            CollageType.SPLIT_VERTICAL -> {
-                Row(Modifier.fillMaxSize().padding(3.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                    Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                }
-            }
-            CollageType.SPLIT_HORIZONTAL -> {
-                Column(Modifier.fillMaxSize().padding(3.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Box(Modifier.weight(1f).fillMaxWidth().background(cellColor, RoundedCornerShape(3.dp)))
-                    Box(Modifier.weight(1f).fillMaxWidth().background(cellColor, RoundedCornerShape(3.dp)))
-                }
-            }
-            CollageType.BIG_LEFT -> {
-                Row(Modifier.fillMaxSize().padding(3.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    Box(Modifier.weight(1.2f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                    Column(Modifier.weight(0.8f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                        Box(Modifier.weight(1f).fillMaxWidth().background(cellColor, RoundedCornerShape(3.dp)))
-                        Box(Modifier.weight(1f).fillMaxWidth().background(cellColor, RoundedCornerShape(3.dp)))
-                    }
-                }
-            }
-            CollageType.BIG_RIGHT -> {
-                Row(Modifier.fillMaxSize().padding(3.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    Column(Modifier.weight(0.8f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                        Box(Modifier.weight(1f).fillMaxWidth().background(cellColor, RoundedCornerShape(3.dp)))
-                        Box(Modifier.weight(1f).fillMaxWidth().background(cellColor, RoundedCornerShape(3.dp)))
-                    }
-                    Box(Modifier.weight(1.2f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                }
-            }
-            CollageType.GRID_2X2 -> {
-                Column(Modifier.fillMaxSize().padding(3.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                        Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                    }
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                        Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                    }
-                }
-            }
-            CollageType.BIG_TOP -> {
-                Column(Modifier.fillMaxSize().padding(3.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Box(Modifier.weight(1.2f).fillMaxWidth().background(cellColor, RoundedCornerShape(3.dp)))
-                    Row(Modifier.weight(0.8f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        repeat(3) { Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp))) }
-                    }
-                }
-            }
-            CollageType.BIG_BOTTOM -> {
-                Column(Modifier.fillMaxSize().padding(3.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(Modifier.weight(0.8f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        repeat(3) { Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp))) }
-                    }
-                    Box(Modifier.weight(1.2f).fillMaxWidth().background(cellColor, RoundedCornerShape(3.dp)))
-                }
-            }
-            CollageType.GRID_ASYMMETRIC -> {
-                Column(Modifier.fillMaxSize().padding(3.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(Modifier.weight(1.2f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                        Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                    }
-                    Row(Modifier.weight(0.8f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        repeat(3) { Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp))) }
-                    }
-                }
-            }
-            CollageType.GRID_2X3 -> {
-                Column(Modifier.fillMaxSize().padding(3.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    repeat(3) {
-                        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                            Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                            Box(Modifier.weight(1f).fillMaxHeight().background(cellColor, RoundedCornerShape(3.dp)))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ─── Live collage preview (same aspect as saved output) ──────────────────────
-@Composable
-fun CollagePreview(
-    type: CollageType,
-    photos: List<PhotoState?>,
-    borderPx: Float,
-    borderStyle: BorderStyle,
-    onAddPhoto: (Int) -> Unit,
-    onRemovePhoto: (Int) -> Unit
-) {
-    val gap = borderPx.dp
-    val cell = @Composable { index: Int, mod: Modifier ->
-        PhotoCellBox(photos.getOrNull(index), index, onAddPhoto, onRemovePhoto, mod)
-    }
-    Box(Modifier.fillMaxSize()) {
-        when (val style = borderStyle) {
-            is BorderStyle.SolidColor -> Spacer(Modifier.fillMaxSize().background(style.color))
-            is BorderStyle.GradientPattern -> {
-                val brush = when (style.dir) {
-                    GradientDir.TOP_BOTTOM -> Brush.verticalGradient(style.colors)
-                    GradientDir.LEFT_RIGHT -> Brush.horizontalGradient(style.colors)
-                    GradientDir.REVERSE_DIAGONAL -> Brush.linearGradient(style.colors, start = androidx.compose.ui.geometry.Offset(Float.POSITIVE_INFINITY, 0f), end = androidx.compose.ui.geometry.Offset(0f, Float.POSITIVE_INFINITY))
-                    GradientDir.RADIAL_CENTER -> Brush.radialGradient(style.colors)
-                    GradientDir.RADIAL_CORNER -> Brush.radialGradient(style.colors, center = androidx.compose.ui.geometry.Offset(0f, 0f), radius = 800f)
-                    else -> Brush.linearGradient(style.colors)
-                }
-                Spacer(Modifier.fillMaxSize().background(brush))
-            }
-        }
-
-        Box(Modifier.fillMaxSize().padding(gap)) {
-            when (type) {
-            CollageType.SPLIT_VERTICAL -> {
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    cell(0, Modifier.weight(1f).fillMaxHeight())
-                    cell(1, Modifier.weight(1f).fillMaxHeight())
-                }
-            }
-            CollageType.SPLIT_HORIZONTAL -> {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    cell(0, Modifier.weight(1f).fillMaxWidth())
-                    cell(1, Modifier.weight(1f).fillMaxWidth())
-                }
-            }
-            CollageType.BIG_LEFT -> {
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    cell(0, Modifier.weight(1.2f).fillMaxHeight())
-                    Column(Modifier.weight(0.8f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(1, Modifier.weight(1f).fillMaxWidth())
-                        cell(2, Modifier.weight(1f).fillMaxWidth())
-                    }
-                }
-            }
-            CollageType.BIG_RIGHT -> {
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    Column(Modifier.weight(0.8f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(0, Modifier.weight(1f).fillMaxWidth())
-                        cell(1, Modifier.weight(1f).fillMaxWidth())
-                    }
-                    cell(2, Modifier.weight(1.2f).fillMaxHeight())
-                }
-            }
-            CollageType.GRID_2X2 -> {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(0, Modifier.weight(1f).fillMaxHeight())
-                        cell(1, Modifier.weight(1f).fillMaxHeight())
-                    }
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(2, Modifier.weight(1f).fillMaxHeight())
-                        cell(3, Modifier.weight(1f).fillMaxHeight())
-                    }
-                }
-            }
-            CollageType.BIG_TOP -> {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    cell(0, Modifier.weight(1.2f).fillMaxWidth())
-                    Row(Modifier.weight(0.8f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(1, Modifier.weight(1f).fillMaxHeight())
-                        cell(2, Modifier.weight(1f).fillMaxHeight())
-                        cell(3, Modifier.weight(1f).fillMaxHeight())
-                    }
-                }
-            }
-            CollageType.BIG_BOTTOM -> {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(Modifier.weight(0.8f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(0, Modifier.weight(1f).fillMaxHeight())
-                        cell(1, Modifier.weight(1f).fillMaxHeight())
-                        cell(2, Modifier.weight(1f).fillMaxHeight())
-                    }
-                    cell(3, Modifier.weight(1.2f).fillMaxWidth())
-                }
-            }
-            CollageType.GRID_ASYMMETRIC -> {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(Modifier.weight(1.2f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(0, Modifier.weight(1f).fillMaxHeight())
-                        cell(1, Modifier.weight(1f).fillMaxHeight())
-                    }
-                    Row(Modifier.weight(0.8f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(2, Modifier.weight(1f).fillMaxHeight())
-                        cell(3, Modifier.weight(1f).fillMaxHeight())
-                        cell(4, Modifier.weight(1f).fillMaxHeight())
-                    }
-                }
-            }
-            CollageType.GRID_2X3 -> {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(0, Modifier.weight(1f).fillMaxHeight())
-                        cell(1, Modifier.weight(1f).fillMaxHeight())
-                    }
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(2, Modifier.weight(1f).fillMaxHeight())
-                        cell(3, Modifier.weight(1f).fillMaxHeight())
-                    }
-                    Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        cell(4, Modifier.weight(1f).fillMaxHeight())
-                        cell(5, Modifier.weight(1f).fillMaxHeight())
-                    }
-                }
-            }
-        }
-        }
-    }
-}
-
-@Composable
-fun PhotoCellBox(
-    state: PhotoState?,
-    index: Int,
-    onAddPhoto: (Int) -> Unit,
-    onRemovePhoto: (Int) -> Unit,
-    modifier: Modifier
-) {
-    Box(modifier = modifier.clip(RoundedCornerShape(6.dp)).background(Dark700)) {
-        if (state != null) {
-            PhotoCell(state = state, modifier = Modifier.fillMaxSize())
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .clickable { 
-                            val matrix = android.graphics.Matrix().apply { postRotate(90f) }
-                            state.bitmap = Bitmap.createBitmap(state.bitmap, 0, 0, state.bitmap.width, state.bitmap.height, matrix, true)
-                            state.panX = 0f
-                            state.panY = 0f
-                            state.zoom = 1f
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("↻", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.offset(y = (-1).dp))
-                }
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .clickable { onRemovePhoto(index) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("✕", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        } else {
-            Box(
-                modifier = Modifier.fillMaxSize().clickable { onAddPhoto(index) },
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier.size(48.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Surface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("＋", color = Pink500, fontSize = 24.sp)
-                }
-            }
-        }
     }
 }
 
@@ -845,7 +608,10 @@ fun PhotoCell(state: PhotoState, modifier: Modifier) {
         modifier = modifier
             .clipToBounds()
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
+                // Two fingers only (pinch to zoom, two-finger drag to pan) - a
+                // single finger is left for the box's own long-press-to-move
+                // gesture, so the two don't fight over the same drag.
+                detectTwoFingerTransformGestures { pan, zoom ->
                     if (canvasSize.width > 0 && canvasSize.height > 0) {
                         state.zoom = (state.zoom * zoom).coerceIn(1f, 5f)
                         state.panX += pan.x / canvasSize.width
