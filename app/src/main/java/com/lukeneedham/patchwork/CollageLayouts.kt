@@ -1,4 +1,4 @@
-package com.tailgunnerx.piccollage
+package com.lukeneedham.patchwork
 
 /**
  * A named starting point for the layout editor. Picking one seeds the editable

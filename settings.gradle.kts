@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PicCollage"
+rootProject.name = "Patchwork"
 include(":app")

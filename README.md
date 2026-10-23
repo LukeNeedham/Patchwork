@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="app_icon.png" width="180" alt="PicCollage Icon">
+  <img src="app_icon.png" width="180" alt="Patchwork Icon">
 </p>
 
-# PicCollage for Android
+# Patchwork for Android
 
 **A high-performance, native Android collage studio built with Jetpack Compose.**
 
-PicCollage is designed for speed, precision, and aesthetic control. Unlike many collage apps that rely on heavy external libraries, this app uses a custom-built rendering engine to deliver high-resolution exports and a butter-smooth UI optimized specifically for Android phone devices.
+Patchwork is designed for speed, precision, and aesthetic control. Unlike many collage apps that rely on heavy external libraries, this app uses a custom-built rendering engine to deliver high-resolution exports and a butter-smooth UI optimized specifically for Android phone devices.
 
 <p align="center">
   <img width="297" height="577" alt="App Preview" src="https://github.com/user-attachments/assets/e39f7b75-2757-4cbe-82da-0aa8d05ecd0e" />
@@ -24,7 +24,7 @@ PicCollage is designed for speed, precision, and aesthetic control. Unlike many 
 - **💾 High-Resolution Export:** Renders collages to a crisp 1080×1080 px file, saved directly to your Gallery.
 
 ## 📱 Specifications
-- **Package ID:** `com.tailgunnerx.piccollage`
+- **Package ID:** `com.lukeneedham.patchwork`
 - **License:** [Apache License 2.0](LICENSE)
 - **OS:** Android 8.0+ (API 26+)
 - **Device Type:** Optimized for Android Phones (Portrait Mode)
@@ -41,9 +41,12 @@ PicCollage is designed for speed, precision, and aesthetic control. Unlike many 
 
 ## 🚀 Getting Started
 
-1. **Clone the Repo:** `git clone https://github.com/tailgunnerx/PicCollage-Android.git`
+1. **Clone the Repo:** `git clone https://github.com/LukeNeedham/PicCollage-Android.git`
 2. **Open in Android Studio:** Select the root project folder.
 3. **Build & Run:** Deploy to your physical device or emulator.
+
+## 🙏 Attribution
+Patchwork is a fork of [tailgunnerx/PicCollage-Android](https://github.com/tailgunnerx/PicCollage-Android), used under the Apache License 2.0. See [NOTICE](NOTICE).
 
 ---
 *Created with focus on Rich Aesthetics and High Performance.*

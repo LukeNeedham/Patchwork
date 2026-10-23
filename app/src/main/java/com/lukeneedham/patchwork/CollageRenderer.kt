@@ -1,4 +1,4 @@
-package com.tailgunnerx.piccollage
+package com.lukeneedham.patchwork
 
 import android.content.ContentValues
 import android.content.Context
@@ -110,7 +110,7 @@ suspend fun renderAndSaveCollage(
     }
 
     // Save to gallery
-    val filename = "PicCollage_${System.currentTimeMillis()}.jpg"
+    val filename = "Patchwork_${System.currentTimeMillis()}.jpg"
     val mimeType = "image/jpeg"
     val stream: OutputStream?
     val uri: Uri?
@@ -119,7 +119,7 @@ suspend fun renderAndSaveCollage(
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, filename)
             put(MediaStore.Images.Media.MIME_TYPE, mimeType)
-            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/PicCollage")
+            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Patchwork")
         }
         uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
         stream = uri?.let { context.contentResolver.openOutputStream(it) }
