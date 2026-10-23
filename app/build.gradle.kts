@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.tailgunnerx.piccollage"
+    namespace = "com.lukeneedham.patchwork"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.tailgunnerx.piccollage"
+        applicationId = "com.lukeneedham.patchwork"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

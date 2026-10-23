@@ -1,0 +1,9 @@
+Patchwork
+Copyright 2026 Luke Needham
+
+This product is a modified version of PicCollage-Android
+(https://github.com/tailgunnerx/PicCollage-Android),
+Copyright 2026 tailgunnerx, licensed under the Apache License, Version 2.0.
+
+Changes: renamed the app to Patchwork and changed the package ID to
+com.lukeneedham.patchwork.

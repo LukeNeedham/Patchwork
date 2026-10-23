@@ -2,4 +2,4 @@
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 -keepattributes *Annotation*
--keep class com.example.piccollage.** { *; }
+-keep class com.lukeneedham.patchwork.** { *; }

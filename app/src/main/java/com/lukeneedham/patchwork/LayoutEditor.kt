@@ -1,4 +1,4 @@
-package com.tailgunnerx.piccollage
+package com.lukeneedham.patchwork
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image

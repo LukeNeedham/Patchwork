@@ -1,4 +1,4 @@
-package com.tailgunnerx.piccollage
+package com.lukeneedham.patchwork
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -87,14 +87,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
-            PicCollageApp()
+            PatchworkApp()
         }
     }
 }
 
 // ─── Root composable ─────────────────────────────────────────────────────────
 @Composable
-fun PicCollageApp() {
+fun PatchworkApp() {
     val initialTemplate = defaultTemplates.first { it.id == "grid_2x2" }
     var root by remember { mutableStateOf(initialTemplate.tree) }
     var selectedTemplateId by remember { mutableStateOf(initialTemplate.id) }
@@ -180,7 +180,7 @@ fun PicCollageApp() {
                 }
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "PicCollage",
+                    "Patchwork",
                     color = White,
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold
@@ -428,7 +428,7 @@ fun PicCollageApp() {
                                 )
                                 withContext(Dispatchers.Main) {
                                     if (uri != null) {
-                                        Toast.makeText(context, "✅ Saved to Pictures/PicCollage!", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "✅ Saved to Pictures/Patchwork!", Toast.LENGTH_SHORT).show()
                                     } else {
                                         Toast.makeText(context, "❌ Save failed", Toast.LENGTH_SHORT).show()
                                     }
