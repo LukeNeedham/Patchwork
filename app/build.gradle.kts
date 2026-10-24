@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.lukeneedham.patchwork"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.lukeneedham.patchwork"
@@ -40,11 +40,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        }
     }
     buildFeatures {
         compose = true
+        buildConfig = true // BuildConfig.DEBUG turns the shared library's debug tools on
     }
     lint {
         disable += "NullSafeMutableLiveData"
@@ -60,6 +63,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.common)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

@@ -17,6 +17,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://lukeneedham.github.io/ci-workflows/maven") {
+            content { includeGroup("com.lukeneedham") } // the shared library; ask it for nothing else
+        }
     }
 }
 
