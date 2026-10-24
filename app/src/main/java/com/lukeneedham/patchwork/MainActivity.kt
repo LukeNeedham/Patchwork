@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lukeneedham.common.logger.Logger
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -149,7 +150,9 @@ fun PatchworkApp() {
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    Logger.e("Could not load the photo $uri", e)
+                }
             }
         }
     }
@@ -428,8 +431,10 @@ fun PatchworkApp() {
                                 )
                                 withContext(Dispatchers.Main) {
                                     if (uri != null) {
+                                        Logger.i("Saved the collage to $uri")
                                         Toast.makeText(context, "✅ Saved to Pictures/Patchwork!", Toast.LENGTH_SHORT).show()
                                     } else {
+                                        Logger.e("Saving the collage failed: no file could be created")
                                         Toast.makeText(context, "❌ Save failed", Toast.LENGTH_SHORT).show()
                                     }
                                 }
