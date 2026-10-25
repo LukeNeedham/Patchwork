@@ -1,0 +1,21 @@
+# The data of this app's README.md. CI renders README.md from it (docs/readme.md in LukeNeedham/ci-workflows):
+# edit this file, never README.md.
+
+name: Patchwork
+tagline: A fast, native collage studio for Android, built with Jetpack Compose.
+
+description: |
+  Patchwork is a native Android collage studio built with Jetpack Compose for speed, precision and aesthetic
+  control. It uses a custom-built rendering engine rather than heavy external libraries, which gives high-resolution
+  exports and a smooth UI on phones.
+
+  Start from one of 10 layouts, from a single frame to a six-photo asymmetric grid, then make it your own: long-press a
+  box to move or remove it, drag its edges to resize, and tap a box or drag a photo in to fill it. Rotate or zoom
+  individual photos, set the border thickness (0 to 40 px) with a slider, and pick a solid colour from a full-spectrum
+  picker or one of 26 neon, cyberpunk, holographic and vaporwave gradient borders. A collage is rendered to a crisp
+  1080×1080 px image and saved straight to your Gallery.
+
+developer:
+  notes: |
+    The collage layouts are trees of boxes and splits (`CollageLayoutTree.kt`, starting points in `CollageLayouts.kt`),
+    edited on the canvas in `LayoutEditor.kt` and rendered for export by `CollageRenderer.kt`.
