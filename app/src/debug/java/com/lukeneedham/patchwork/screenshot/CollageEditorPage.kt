@@ -14,6 +14,7 @@ import com.lukeneedham.patchwork.CollageEditorUiState
 import com.lukeneedham.patchwork.PhotoState
 import com.lukeneedham.patchwork.PoolPhoto
 import com.lukeneedham.patchwork.defaultTemplates
+import com.lukeneedham.patchwork.leafIds
 
 /** Rendered by CI to docs/screenshots/<position in order.txt>-CollageEditorPage.png: the editor with a photo in every box. */
 @Preview
