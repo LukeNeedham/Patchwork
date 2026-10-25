@@ -1,3 +1,2 @@
-# the order of the README: the editor with photos first, then a fresh one
 CollageEditorPage
 CollageEditorEmptyPage
