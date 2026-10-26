@@ -51,6 +51,7 @@ private fun CollageEditorPageScreenshot() {
         onBorderPxChange = {},
         onBorderStyleChange = {},
         onSave = {},
+        onOpenSettings = {},
     )
 }
 
@@ -75,5 +76,6 @@ private fun CollageEditorEmptyPageScreenshot() {
         onBorderPxChange = {},
         onBorderStyleChange = {},
         onSave = {},
+        onOpenSettings = {},
     )
 }
