@@ -17,34 +17,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-/**
- * Everything the collage editor shows. [photosByBoxId] maps a box of the [root] layout to the photo placed in it, and
- * [photoPool] holds every photo the user picked, placed or not.
- */
-data class CollageEditorUiState(
-    val root: LayoutNode,
-    val selectedTemplateId: String,
-    val photosByBoxId: Map<String, PhotoState> = emptyMap(),
-    val photoPool: List<PoolPhoto> = emptyList(),
-    val borderPx: Float = 8f,
-    val borderStyle: BorderStyle = BorderStyle.SolidColor(Color.White),
-    val isSaving: Boolean = false,
-) {
-    /** A collage can be saved once every box has a photo. */
-    val canSave: Boolean
-        get() {
-            val leafIds = root.leafIds()
-            return leafIds.isNotEmpty() && leafIds.all { photosByBoxId.containsKey(it) } && !isSaving
-        }
-
-    companion object {
-        fun initial(): CollageEditorUiState {
-            val template = defaultTemplates.first { it.id == "grid_2x2" }
-            return CollageEditorUiState(root = template.tree, selectedTemplateId = template.id)
-        }
-    }
-}
-
 /** One-off results that the page shows once. */
 sealed interface CollageEditorEvent {
     data class Saved(val uri: Uri) : CollageEditorEvent
