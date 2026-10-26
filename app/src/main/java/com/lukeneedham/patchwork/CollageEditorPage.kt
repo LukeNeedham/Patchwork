@@ -54,7 +54,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 
 /** The collage editor: connects [CollageEditorViewModel] to the photo picker and the toasts, and draws nothing itself. */
 @Composable
-fun CollageEditorPage() {
+fun CollageEditorPage(onOpenSettings: () -> Unit) {
     val viewModel = viewModel<CollageEditorViewModel>()
     val context = LocalContext.current
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -86,5 +86,6 @@ fun CollageEditorPage() {
         onBorderPxChange = viewModel::onBorderPxChange,
         onBorderStyleChange = viewModel::onBorderStyleChange,
         onSave = viewModel::onSave,
+        onOpenSettings = onOpenSettings,
     )
 }

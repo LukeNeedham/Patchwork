@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lukeneedham.common.logger.Logger
@@ -64,6 +65,7 @@ internal fun CollageEditorPageContent(
     onBorderPxChange: (Float) -> Unit,
     onBorderStyleChange: (BorderStyle) -> Unit,
     onSave: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -96,6 +98,15 @@ internal fun CollageEditorPageContent(
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold
                 )
+                Spacer(Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clickable(role = Role.Button, onClickLabel = "Settings", onClick = onOpenSettings),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("⚙", color = Subtle, fontSize = 22.sp)
+                }
             }
 
             // ── Layout picker ────────────────────────────────────────────────
@@ -358,5 +369,6 @@ private fun Preview() {
         onBorderPxChange = {},
         onBorderStyleChange = {},
         onSave = {},
+        onOpenSettings = {},
     )
 }
