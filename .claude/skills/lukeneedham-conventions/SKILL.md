@@ -6,7 +6,7 @@ description: Luke Needham's conventions for Android apps - project setup, debug 
 # Luke's app conventions
 
 This folder is copied from `LukeNeedham/ci-workflows` (`skills/lukeneedham-conventions`) by CI, which opens a
-"Sync from ci-workflows" PR when it differs, which merges itself once its checks pass. Never edit it here; change it
+"Sync from ci-workflows" PR when it differs, and that PR merges itself once its checks pass. Never edit it here; change it
 there. The same goes for the callers in `.github/workflows/`.
 
 The long guides are in that repo's `docs/`: `new-app.md` (read first when starting an app), `setup.md`,
@@ -31,8 +31,8 @@ below are enough.
 - Every app is built the same way and nothing is configured per app: module `:app`, debug APK at
   `app/build/outputs/apk/debug/app-debug.apk`, PRs into `main` only (never `master` or `develop`), JDK 17.
   A new app needs only its entry (`name`, `repo`) in `ci-workflows`' `apps.json`.
-  Claude cannot create the repo (403): the user makes it with AppHub's New app button, which creates the repo and then runs
-  the *New App* workflow of `ci-workflows` (`docs/create-app.md`), which adds the entry, the first sync and a Kotlin
+  Claude cannot create the repo (403): the user makes it, then sets it up with the *New App* workflow of
+  `ci-workflows` (`docs/create-app.md`), which adds the entry, the first sync and a Kotlin
   Multiplatform project (Android target only: shared code in `commonMain`, `App`, `MainActivity` and the manifest in `androidMain`, the
   screenshots in `androidDebug`, strings as Compose resources) that builds: the debug keystore, the dependencies, the app shell,
   `AppTheme` and a `SettingsPage` with the `DebugButton`. Look at what is there before adding anything, and keep Android-only
