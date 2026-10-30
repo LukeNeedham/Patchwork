@@ -1,11 +1,11 @@
 package com.lukeneedham.patchwork
 
 import android.app.Application
-import com.lukeneedham.patchwork.di.appModule
-import org.koin.android.ext.koin.androidContext
-import org.koin.core.context.startKoin
 import com.lukeneedham.common.DebugKit
 import com.lukeneedham.common.DebugKitConfig
+import com.lukeneedham.patchwork.di.KoinModules
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.context.startKoin
 
 class App : Application() {
     override fun onCreate() {
@@ -14,7 +14,7 @@ class App : Application() {
         DebugKit.init(DebugKitConfig(enabled = BuildConfig.DEBUG))
         startKoin {
             androidContext(this@App)
-            modules(appModule)
+            modules(KoinModules.modules)
         }
     }
 }
