@@ -1,13 +1,11 @@
 package com.lukeneedham.patchwork
 
-import android.app.Application
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lukeneedham.common.logger.Logger
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +21,10 @@ sealed interface CollageEditorEvent {
     data object SaveFailed : CollageEditorEvent
 }
 
-class CollageEditorViewModel(application: Application) : AndroidViewModel(application) {
+class CollageEditorViewModel(
+    private val photoLoader: PhotoLoader,
+    private val collageSaver: CollageSaver,
+) : ViewModel() {
     var uiState by mutableStateOf(CollageEditorUiState.initial())
         private set
 
@@ -70,13 +71,11 @@ class CollageEditorViewModel(application: Application) : AndroidViewModel(applic
         val assignBoxId = pendingAssignBoxId
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                getApplication<Application>().contentResolver.openInputStream(uri)?.use { stream ->
-                    val bitmap = BitmapFactory.decodeStream(stream)
-                    withContext(Dispatchers.Main) {
-                        val poolPhoto = PoolPhoto(UUID.randomUUID().toString(), PhotoState(bitmap))
-                        val placed = if (assignBoxId != null) uiState.photosByBoxId + (assignBoxId to poolPhoto.state) else uiState.photosByBoxId
-                        uiState = uiState.copy(photoPool = uiState.photoPool + poolPhoto, photosByBoxId = placed)
-                    }
+                val bitmap = photoLoader.load(uri) ?: return@launch
+                withContext(Dispatchers.Main) {
+                    val poolPhoto = PoolPhoto(UUID.randomUUID().toString(), PhotoState(bitmap))
+                    val placed = if (assignBoxId != null) uiState.photosByBoxId + (assignBoxId to poolPhoto.state) else uiState.photosByBoxId
+                    uiState = uiState.copy(photoPool = uiState.photoPool + poolPhoto, photosByBoxId = placed)
                 }
             } catch (e: Exception) {
                 Logger.e("Could not load the photo $uri", e)
@@ -90,8 +89,7 @@ class CollageEditorViewModel(application: Application) : AndroidViewModel(applic
         uiState = state.copy(isSaving = true)
         viewModelScope.launch {
             try {
-                val uri = renderAndSaveCollage(
-                    context = getApplication<Application>(),
+                val uri = collageSaver.save(
                     layout = state.root,
                     photosByBoxId = state.photosByBoxId.mapValues { it.value.toPhotoData() },
                     borderPx = state.borderPx.toInt(),

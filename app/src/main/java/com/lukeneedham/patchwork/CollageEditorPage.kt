@@ -49,13 +49,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import org.koin.compose.viewmodel.koinViewModel
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.lifecycle.viewmodel.compose.viewModel
+
 
 /** The collage editor: connects [CollageEditorViewModel] to the photo picker and the toasts, and draws nothing itself. */
 @Composable
 fun CollageEditorPage(onOpenSettings: () -> Unit) {
-    val viewModel = viewModel<CollageEditorViewModel>()
+    val viewModel = koinViewModel<CollageEditorViewModel>()
     val context = LocalContext.current
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
